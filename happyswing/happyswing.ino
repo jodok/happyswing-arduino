@@ -23,7 +23,7 @@ const char* ntp_server = "pool.ntp.org";
 
 const unsigned long send_interval_ms = 100;
 
-const unsigned int measurement_buffer_size = 32;
+const unsigned int measurement_buffer_size = 128;
 
 const char* test_root_ca = \
     "-----BEGIN CERTIFICATE-----\n" \ 
@@ -92,12 +92,14 @@ void loop() {
   if (client.connected() && ((millis() - lastUpdate) > send_interval_ms)) {
     char payload[250];
 
-    float rms = calculateRMS();
+    float rms32 = calculateRMS(32);
+    float rms64 = calculateRMS(64);
+    float rms128 = calculateRMS(128);
     addNewMeasurement(angle);
 
     char* unix = readUnixTime();
-    char* payload_mask = "{\"ts\": %s, \"angle\": %.2f, \"rms\": %.2f}";
-    snprintf(payload, sizeof(payload), payload_mask, unix, angle, rms);
+    char* payload_mask = "{\"ts\": %s, \"angle\": %.2f, \"rms\": %.2f, \"rms32\": %.2f, \"rms64\": %.2f, \"rms128\": %.2f}";
+    snprintf(payload, sizeof(payload), payload_mask, unix, angle, rms32, rms32, rms64, rms128);
     client.publish(topic, payload);
     lastUpdate = millis();
   }
@@ -111,12 +113,13 @@ void addNewMeasurement(float value) {
   measurements[measurement_buffer_size - 1] = value;
 }
 
-float calculateRMS() {
+float calculateRMS(int count) {
   float rms = 0;
-  for (int i = 0; i < measurement_buffer_size; i++) {
-    rms += measurements[i] * measurements[i];
+  for (int i = 0; i < count; i++) {
+    float measurement = measurements[measurement_buffer_size - i - 1];
+    rms += measurement * measurement;
   }
-  return sqrt(rms / float(measurement_buffer_size));
+  return sqrt(rms / float(count));
 }
 
 char* readUnixTime() {
