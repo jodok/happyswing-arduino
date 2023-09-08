@@ -82,8 +82,11 @@ void loop() {
   sensors_event_t event;
   accel.getEvent(&event);
 
-  float roll = atan2(-event.acceleration.y, -event.acceleration.z) * 180.0 / PI;
-  float pitch = atan2(-event.acceleration.x, sqrt(event.acceleration.y * event.acceleration.y + event.acceleration.z * event.acceleration.z)) * 180.0 / PI;
+  float roll = asin(max(min(-event.acceleration.y / 9.81, 1.0), -1.0)) * 180.0 / PI;
+  
+  Serial.print(-event.acceleration.y);
+  Serial.print(",");
+  Serial.println(roll);
 
   float angle = kalmanAngle.updateEstimate(roll);
 
@@ -139,6 +142,9 @@ void reconnectWiFiIfLost() {
     Serial.println("Reconnecting to WiFi...");
     WiFi.disconnect();
     WiFi.reconnect();
+  }
+  if (!client.connected()) {
+    setupMQTT();
   }
 }
 
