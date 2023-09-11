@@ -2,22 +2,21 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <NTPClient.h>
 #include <SimpleKalmanFilter.h>
 
 // --- Config start ---
 
-const char* topic = "accel/1";
+const char* topic = "accel/4";
 
 const char* ssid = "happyswing";
 const char* password = "****";
 
-const char* mqtt_server = "mqtt.happyswing.at";
-const int mqtt_port = 8883;
-const char* mqtt_username = "happyswing";
-const char* mqtt_password = "mohapmohap!";
+const char* mqtt_server = "192.168.1.252";
+const int mqtt_port = 1883;
+const char* mqtt_username = "";
+const char* mqtt_password = "";
 
 const char* ntp_server = "pool.ntp.org";
 
@@ -52,7 +51,7 @@ const char* test_root_ca = \
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, ntp_server);
 
-WiFiClientSecure espClient = WiFiClientSecure();
+WiFiClient espClient;
 PubSubClient client(espClient);
 
 SimpleKalmanFilter kalmanAngle(10, 10, 1);
@@ -70,7 +69,7 @@ void setup() {
   Serial.begin(115200);
   // TODO: use CA cert and don't run in insecure mode
   // espClient.setCACert(test_root_ca);
-  espClient.setInsecure();
+  // espClient.setInsecure();
 
   setupWiFi();
   setupMQTT();
