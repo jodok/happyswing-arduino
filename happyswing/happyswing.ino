@@ -1,14 +1,14 @@
-#include <Wire.h>
-#include <Adafruit_Sensor.h>
 #include <Adafruit_ADXL345_U.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
+#include <Adafruit_Sensor.h>
 #include <NTPClient.h>
+#include <PubSubClient.h>
 #include <SimpleKalmanFilter.h>
+#include <WiFi.h>
+#include <Wire.h>
 
 // --- Config start ---
 
-const char* topic = "accel/4";
+const char* topic = "accel/1";
 
 const char* ssid = "happyswing";
 const char* password = "****";
@@ -18,13 +18,11 @@ const int mqtt_port = 1883;
 const char* mqtt_username = "";
 const char* mqtt_password = "";
 
-const char* ntp_server = "pool.ntp.org";
-
 const unsigned long send_interval_ms = 100;
 
 const unsigned int measurement_buffer_size = 128;
 
-const char* test_root_ca = \
+const char* test_root_ca =
     "-----BEGIN CERTIFICATE-----\n" \ 
     "MIIDUTCCAjmgAwIBAgIJAPPYCjTmxdt/MA0GCSqGSIb3DQEBCwUAMD8xCzAJBgNV\n" \ 
     "BAYTAkNOMREwDwYDVQQIDAhoYW5nemhvdTEMMAoGA1UECgwDRU1RMQ8wDQYDVQQD\n" \ 
@@ -48,9 +46,6 @@ const char* test_root_ca = \
 
 // --- Config end ---
 
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, ntp_server);
-
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -58,133 +53,113 @@ SimpleKalmanFilter kalmanAngle(10, 10, 1);
 
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
-unsigned long bootUnixTime;
-unsigned long bootMillisTime;
-
 unsigned long lastUpdate = 0;
 
-float measurements[measurement_buffer_size] = { 0.0 };
+float measurements[measurement_buffer_size] = {0.0};
 
 void setup() {
-  Serial.begin(115200);
-  // TODO: use CA cert and don't run in insecure mode
-  // espClient.setCACert(test_root_ca);
-  // espClient.setInsecure();
+    Serial.begin(115200);
+    // TODO: use CA cert and don't run in insecure mode
+    // espClient.setCACert(test_root_ca);
+    // espClient.setInsecure();
 
-  setupWiFi();
-  setupMQTT();
-  setupUnix();
-  setupAccel();
+    Serial.println("HI");
+
+    setupWiFi();
+    setupMQTT();
+    setupAccel();
 }
 
 void loop() {
-  sensors_event_t event;
-  accel.getEvent(&event);
+    sensors_event_t event;
+    accel.getEvent(&event);
+    float acceleration = event.acceleration.y;
 
-  float roll = asin(max(min(-event.acceleration.y / 9.81, 1.0), -1.0)) * 180.0 / PI;
-  
-  Serial.print(-event.acceleration.y);
-  Serial.print(",");
-  Serial.println(roll);
+    float roll = asin(max(min(-acceleration / 9.81, 1.0), -1.0)) * 180.0 / PI;
 
-  float angle = kalmanAngle.updateEstimate(roll);
+    Serial.print(-acceleration);
+    Serial.print(",");
+    Serial.println(roll);
 
-  reconnectWiFiIfLost();
+    float angle = kalmanAngle.updateEstimate(roll);
 
-  if (client.connected() && ((millis() - lastUpdate) > send_interval_ms)) {
-    char payload[250];
+    reconnectWiFiIfLost();
 
-    float rms32 = calculateRMS(32);
-    float rms64 = calculateRMS(64);
-    float rms128 = calculateRMS(128);
-    addNewMeasurement(angle);
+    if (client.connected() && ((millis() - lastUpdate) > send_interval_ms)) {
+        char payload[250];
 
-    char* unix = readUnixTime();
-    char* payload_mask = "{\"ts\": %s, \"angle\": %.2f, \"rms\": %.2f, \"rms32\": %.2f, \"rms64\": %.2f, \"rms128\": %.2f}";
-    snprintf(payload, sizeof(payload), payload_mask, unix, angle, rms32, rms32, rms64, rms128);
-    client.publish(topic, payload);
-    lastUpdate = millis();
-  }
+        float rms32 = calculateRMS(32);
+        float rms64 = calculateRMS(64);
+        float rms128 = calculateRMS(128);
+        addNewMeasurement(angle);
 
-  client.loop();
-  delay(10);
+        char* payload_mask = "{\"ts\": 0, \"angle\": %.2f, \"rms\": %.2f, \"rms32\": %.2f, \"rms64\": %.2f, \"rms128\": %.2f}";
+        snprintf(payload, sizeof(payload), payload_mask, time, angle, rms32, rms32, rms64, rms128);
+        client.publish(topic, payload);
+        Serial.println(payload);
+        lastUpdate = millis();
+    }
+
+    client.loop();
+    delay(10);
 }
 
 void addNewMeasurement(float value) {
-  memcpy(measurements, &measurements[1], sizeof(measurements) - sizeof(float));
-  measurements[measurement_buffer_size - 1] = value;
+    memcpy(measurements, &measurements[1], sizeof(measurements) - sizeof(float));
+    measurements[measurement_buffer_size - 1] = value;
 }
 
 float calculateRMS(int count) {
-  float rms = 0;
-  for (int i = 0; i < count; i++) {
-    float measurement = measurements[measurement_buffer_size - i - 1];
-    rms += measurement * measurement;
-  }
-  return sqrt(rms / float(count));
-}
-
-char* readUnixTime() {
-  unsigned long unix1 = bootUnixTime / 100000;
-  unsigned long unix2 = (bootUnixTime % 100000) * 1000 + millis() - bootMillisTime;
-
-  static char str[16];
-  snprintf(str, sizeof(str), "%04lu%07lu", unix1, unix2);
-  return str;
+    float rms = 0;
+    for (int i = 0; i < count; i++) {
+        float measurement = measurements[measurement_buffer_size - i - 1];
+        rms += measurement * measurement;
+    }
+    return sqrt(rms / float(count));
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {}
 
 void reconnectWiFiIfLost() {
-  // TODO: also reconnect MQTT
-  if ((WiFi.status() != WL_CONNECTED)) {
-    Serial.println("Reconnecting to WiFi...");
-    WiFi.disconnect();
-    WiFi.reconnect();
-  }
-  if (!client.connected()) {
-    setupMQTT();
-  }
+    // TODO: also reconnect MQTT
+    if ((WiFi.status() != WL_CONNECTED)) {
+        Serial.println("Reconnecting to WiFi...");
+        WiFi.disconnect();
+        WiFi.reconnect();
+    }
+    if (!client.connected()) {
+        setupMQTT();
+    }
 }
 
 void setupWiFi() {
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.println("Connecting to WiFi...");
-  }
-  Serial.println("Connected to WiFi");
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.println("Connecting to WiFi...");
+    }
+    Serial.println("Connected to WiFi");
 }
 
 void setupMQTT() {
-  client.setServer(mqtt_server, mqtt_port);
-  client.setCallback(callback);
-  while (!client.connected()) {
-    Serial.println("Connecting to MQTT...");
-    if (client.connect("ArduinoClient", mqtt_username, mqtt_password)) {
-      Serial.println("Connected to MQTT");
-    } else {
-      Serial.print("MQTT Connection failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" Retrying...");
-      delay(5000);
+    client.setServer(mqtt_server, mqtt_port);
+    client.setCallback(callback);
+    while (!client.connected()) {
+        Serial.println("Connecting to MQTT...");
+        if (client.connect("ArduinoClient", mqtt_username, mqtt_password)) {
+            Serial.println("Connected to MQTT");
+        } else {
+            Serial.print("MQTT Connection failed, rc=");
+            Serial.print(client.state());
+            Serial.println(" Retrying...");
+            delay(5000);
+        }
     }
-  }
-}
-
-void setupUnix() {
-  timeClient.begin();
-  timeClient.setTimeOffset(3600);
-
-  while (!timeClient.update()) {}
-
-  bootUnixTime = timeClient.getEpochTime();
-  bootMillisTime = millis();
 }
 
 void setupAccel() {
-  if (!accel.begin()) {
-    Serial.println("Could not find a valid ADXL345 sensor, check wiring!");
-    while (1);
-  }
+    if (!accel.begin()) {
+        Serial.println("Could not find a valid ADXL345 sensor, check wiring!");
+        while (1);
+    }
 }
